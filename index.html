@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>완하이 과테말라 모선 트래커</title>
+<meta name="description" content="완하이(Wan Hai) 상해·닝보 → 과테말라 Puerto Quetzal 모선 스케줄, 매일 갱신">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&display=swap">
+<script src="vendor/d3.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --color-bg: #f6f7f8; --color-panel: #ffffff; --color-fg: #1c2127; --color-fg-muted: #5f6b77;
+  --color-border-line: #dde2e7; --color-ok: #1f7a4d; --color-warn: #a65d00; --color-bad: #c23a2b;
+  --font-anthropic-sans: "Noto Sans KR", system-ui, -apple-system, "Apple SD Gothic Neo", sans-serif;
+  --font-anthropic-serif: "Noto Serif KR", Georgia, "Apple SD Gothic Neo", serif;
+  --cds-font-size-caption: 12.5px; --cds-font-size-body: 14px; --cds-font-size-heading: 16px; --cds-font-size-title: 28px;
+  --cds-font-weight-medium: 600;
+  --cds-gap-xs: 4px; --cds-gap-sm: 8px; --cds-gap-md: 12px; --cds-gap-lg: 20px; --cds-gap-xl: 32px;
+  --cds-pad-xs: 4px; --cds-pad-sm: 8px; --cds-pad-md: 12px; --cds-pad-lg: 18px;
+  --cds-radius: 8px;
+  --cds-chart-grid: #e8ecef; --cds-chart-axis: #b8c1ca; --cds-chart-reference: #8a96a3; --cds-chart-muted: #c3cbd3;
+  --cds-chart-status-critical: #d9534f;
+  --cds-surface-popover: #ffffff; --cds-border: #d4dae0; --cds-shadow-popover: 0 4px 14px rgba(20, 30, 40, .12);
+  --cds-text-secondary: #5f6b77; --cds-dur-slow: .3s;
+  --c1: #2f6fb0; --c2: #d08a1e;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --color-bg: #121519; --color-panel: #1a1f24; --color-fg: #e6eaee; --color-fg-muted: #9aa6b2;
+    --color-border-line: #2c333a; --color-ok: #5cc08a; --color-warn: #e3a447; --color-bad: #f07a6b;
+    --cds-chart-grid: #262d34; --cds-chart-axis: #4a545e; --cds-chart-reference: #7d8996; --cds-chart-muted: #3a434c;
+    --cds-chart-status-critical: #f07a6b;
+    --cds-surface-popover: #20262c; --cds-border: #343c44; --cds-shadow-popover: 0 4px 14px rgba(0, 0, 0, .4);
+    --cds-text-secondary: #9aa6b2;
+    --c1: #6aa6e6; --c2: #f0b35a;
+  }
+}
+html, body { margin: 0; background: var(--color-bg); color: var(--color-fg); font-family: var(--font-anthropic-sans); font-size: 14px; }
+#dash-root { max-width: 1280px; margin: 0 auto; padding-block: 24px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.site-meta { color: var(--color-fg-muted); font-size: 12.5px; margin-top: 4px; }
+.dash-skeleton { color: transparent !important; background: var(--color-border-line); border-radius: 4px; }
+footer.site { color: var(--color-fg-muted); font-size: 12px; margin-top: 32px; }
+</style>
+<script>
+// Minimal stand-in for the dashboard runtime: loads the data files next to this page.
+(() => {
+  const files = { sailings: 'data/sailings.json', port_calls: 'data/port_calls.json', changes: 'data/changes.json' };
+  const state = {}; const calcs = {}; const subs = [];
+  Object.keys(files).forEach((id) => { state[id] = { status: 'loading', data: [] }; });
+  const run = () => {
+    Object.entries(calcs).forEach(([id, c]) => {
+      const ins = c.inputs.map((i) => state[i]);
+      if (ins.every((s) => s.status === 'ok')) {
+        try { state[id] = { status: 'ok', data: c.fn(...ins.map((s) => s.data)) }; }
+        catch (e) { state[id] = { status: 'error', data: [], message: String(e) }; }
+      } else if (ins.some((s) => s.status === 'error')) state[id] = { status: 'error', data: [] };
+      else state[id] = { status: 'loading', data: [] };
+    });
+    subs.forEach((fn) => { try { fn(); } catch (e) { console.error(e); } });
+  };
+  window.dash = {
+    data: (id) => state[id] || { status: 'missing', data: [] },
+    onData: (fn) => { subs.push(fn); try { fn(); } catch (e) { console.error(e); } },
+    calc: (id, c) => { calcs[id] = c; state[id] = { status: 'loading', data: [] }; },
+    colors: ['var(--c1)', 'var(--c2)'],
+    refresh: () => {}, params: () => ({}), setParams: () => {}, resetParams: () => {}, setLink: () => {},
+  };
+  const bust = '?v=' + Date.now();
+  window.addEventListener('DOMContentLoaded', () => {
+    Object.entries(files).forEach(([id, url]) => fetch(url + bust).then((r) => r.json()).then((d) => {
+      state[id] = { status: 'ok', data: Array.isArray(d) ? d : (d.rows || []) }; run();
+    }).catch(() => { state[id] = { status: 'error', data: [] }; run(); }));
+    fetch('data/meta.json' + bust).then((r) => r.json()).then((m) => {
+      const el = document.getElementById('site-updated');
+      if (el && m.updated) el.textContent = '마지막 갱신: ' + m.updated + ' (한국 시간) · 출처: 완하이(Wan Hai) 홈페이지 공개 스케줄';
+    }).catch(() => {});
+    let w = window.innerWidth;
+    window.addEventListener('resize', () => { if (Math.abs(window.innerWidth - w) > 40) { w = window.innerWidth; subs.forEach((fn) => fn()); } });
+  });
+})();
+</script>
+</head>
+<body>
+<div id="dash-root">
+<style>
+#dash-root { --dash-gutter: clamp(16px, 3vw, 32px); }
+.gt { font-family: var(--font-anthropic-sans); display: flex; flex-direction: column; gap: var(--cds-gap-lg); }
+.gt h1 { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; text-wrap: balance; }
+.gt h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0; }
+.gt .lede { color: var(--color-fg-muted); margin: var(--cds-gap-xs) 0 0; max-width: 70ch; }
+.gt .lede b { color: var(--color-fg); font-weight: 600; }
+.gt .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--cds-gap-md); }
+.gt .tile, .gt .card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); }
+.gt .tile { padding: var(--cds-pad-md) var(--cds-pad-lg); display: flex; flex-direction: column; gap: var(--cds-gap-xs); }
+.gt .tile .lab { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.gt .tile .num { font-family: var(--font-anthropic-serif); font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.gt .card { padding: var(--cds-pad-lg); display: flex; flex-direction: column; gap: var(--cds-gap-sm); min-width: 0; }
+.gt .note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: 0; }
+.gt .bar { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: center; }
+.gt .chip { font: inherit; font-size: var(--cds-font-size-caption); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--color-border-line); background: var(--color-bg); color: var(--color-fg); cursor: pointer; }
+.gt .chip[aria-pressed="true"] { background: var(--color-fg); color: var(--color-bg); border-color: var(--color-fg); }
+.gt .chip:focus-visible, .gt select:focus-visible, .gt input:focus-visible { outline: 2px solid var(--color-fg); outline-offset: 2px; }
+.gt input[type=search], .gt select { font: inherit; font-size: var(--cds-font-size-caption); padding: 5px 8px; border-radius: var(--cds-radius); border: 1px solid var(--color-border-line); background: var(--color-bg); color: var(--color-fg); }
+.gt input[type=search] { min-width: 0; flex: 1 1 12rem; max-width: 20rem; }
+.gt .scroll { overflow: auto; max-height: 34rem; }
+.gt table { border-collapse: collapse; width: 100%; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+.gt th { text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: 6px 8px; border-bottom: 1px solid var(--color-border-line); position: sticky; top: 0; background: var(--color-panel); white-space: nowrap; }
+.gt th button { all: unset; cursor: pointer; }
+.gt th button:focus-visible { outline: 2px solid var(--color-fg); }
+.gt td { padding: 6px 8px; border-bottom: 1px solid var(--color-border-line); white-space: nowrap; vertical-align: top; }
+.gt td.v { font-weight: 600; }
+.gt tr.past td { color: var(--color-fg-muted); }
+.gt .pill { display: inline-block; font-size: 11px; line-height: 1; padding: 3px 6px; border-radius: 4px; margin-left: 6px; border: 1px solid currentColor; }
+.gt .p-A { color: var(--color-ok); }
+.gt .p-E { color: var(--color-fg-muted); }
+.gt .p-S { color: var(--color-bad); }
+.gt .p-L { color: var(--color-warn); }
+.gt .skip { text-decoration: line-through; color: var(--color-fg-muted); }
+.gt .stage { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; background: var(--color-bg); border: 1px solid var(--color-border-line); }
+.gt .stage.s-arr { color: var(--color-ok); border-color: currentColor; }
+.gt .stage.s-sea { color: var(--color-warn); border-color: currentColor; }
+.gt .late { color: var(--color-bad); font-weight: 600; }
+.gt .early { color: var(--color-ok); font-weight: 600; }
+.gt .chart { position: relative; min-height: 220px; }
+.gt .tip { position: absolute; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); border-radius: var(--cds-radius); box-shadow: var(--cds-shadow-popover); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); pointer-events: none; white-space: nowrap; z-index: 2; }
+.gt .tip .d { color: var(--cds-text-secondary); }
+.gt .empty { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); padding: var(--cds-pad-md) 0; }
+.gt .fail { display: flex; align-items: center; justify-content: center; gap: 6px; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); min-height: 120px; }
+.gt .fail::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--color-bad); }
+.gt [data-dash-source-state=empty] { color: transparent; }
+.gt [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+.gt td.why { white-space: normal; min-width: 11rem; }
+.gt td .sub { color: var(--color-fg-muted); font-size: 11px; }
+.gt .note b { color: var(--color-fg); font-weight: 600; }
+.gt tr.sys td { color: var(--color-fg-muted); }
+.gt .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 28rem), 1fr)); gap: var(--cds-gap-md); }
+</style>
+
+<div class="gt">
+  <header id="top">
+    <h1>완하이 과테말라 모선 트래커</h1>
+    <p class="lede">상해·닝보 → Puerto Quetzal 직항 모선 (ASA·AS2 서비스).
+      다음 출항 <b class="dash-skeleton" data-source="summary" data-field="next_dep">—</b>,
+      다음 과테말라 도착 <b class="dash-skeleton" data-source="summary" data-field="next_arr">—</b>.</p>
+    <p class="site-meta" id="site-updated"></p>
+  </header>
+
+  <section class="tiles" id="tiles">
+    <div class="tile"><span class="lab">추적 모선</span><span class="num dash-skeleton" data-source="summary" data-field="vessels">—</span></div>
+    <div class="tile"><span class="lab">선적 예정 항차</span><span class="num dash-skeleton" data-source="summary" data-field="upcoming">—</span></div>
+    <div class="tile"><span class="lab">과테말라로 항해 중</span><span class="num dash-skeleton" data-source="summary" data-field="at_sea">—</span></div>
+    <div class="tile"><span class="lab">최근 수집 변경 건수</span><span class="num dash-skeleton" data-source="summary" data-field="changes_latest">—</span></div>
+  </section>
+
+  <section class="card" id="sailings">
+    <h2>과테말라행 항차</h2>
+    <p class="note">항차별 상해·닝보 출항(ETD)과 Puerto Quetzal 도착(ETA). 출항 후에도 모선별 조회로 도착까지 계속 추적하고, 도착 후 2주가 지나면 목록에서 빠집니다. 상태: 출항=상해·닝보 실제 출항, 도착=Puerto Quetzal 실제 도착, 예정=추정, Skip=해당 항구 미기항, 장기=장기 계획.</p>
+    <p class="note"><b>ETA 변동</b>은 전날 수집분 대비. <b>지연 발생 지점</b>은 이 항차(직전 귀항 구간 포함)에서 이미 기항한 항구 중 입항(ETA)→접안(ETB) 대기가 가장 길었던 곳(24시간 이상)과, ETA가 바뀐 날 처음 일정이 밀린 항구입니다. 3일 이상 대기는 빨간색.</p>
+    <div class="bar">
+      <button class="chip" id="st-all" aria-pressed="true" data-stage="">전체</button>
+      <button class="chip" id="st-up" aria-pressed="false" data-stage="선적 예정">선적 예정</button>
+      <button class="chip" id="st-sea" aria-pressed="false" data-stage="항해 중">항해 중</button>
+      <button class="chip" id="st-arr" aria-pressed="false" data-stage="과테말라 도착">도착</button>
+      <input type="search" id="sail-q" placeholder="모선명 검색" aria-label="모선명 검색">
+    </div>
+    <div class="scroll">
+      <table id="sail-table" data-source="sailings" data-row-key="key">
+        <thead><tr>
+          <th data-field="vessel"><button data-sort="vessel">모선</button></th>
+          <th data-field="voyage">항차</th>
+          <th data-field="service"><button data-sort="service">서비스</button></th>
+          <th data-field="sha_etd"><button data-sort="sha_etd">상해 ETD</button></th>
+          <th data-field="ngb_etd"><button data-sort="ngb_etd">닝보 ETD</button></th>
+          <th data-field="pq_eta"><button data-sort="pq_eta" aria-sort="ascending">도착 ETA</button></th>
+          <th data-field="transit_days"><button data-sort="transit_days">T/T(일)</button></th>
+          <th data-field="stage">단계</th>
+          <th data-field="eta_shift_days">ETA 변동</th>
+          <th data-field="delay_note">지연 발생 지점</th>
+          <th data-field="skipped_ports">Skip 항구</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card" id="timeline">
+    <h2>출항 → 과테말라 도착 일정</h2>
+    <p class="note">아직 도착하지 않은 항차. 막대는 첫 출항항(상해 또는 닝보) ETD부터 Puerto Quetzal ETA까지, 세로선은 오늘.</p>
+    <div class="chart" id="gantt" data-source="sailings"></div>
+  </section>
+
+  <section class="card" id="congestion">
+    <h2>항구별 접안 대기</h2>
+    <p class="note">추적 중인 모선들이 최근 60일 동안 실제로 기항한 항구에서 입항(ETA)부터 접안(ETB)까지 기다린 평균 일수. 막대 옆 숫자는 최장 대기와 기항 횟수.</p>
+    <div class="chart" id="cong-chart" data-source="port_wait" style="min-height: 160px"></div>
+  </section>
+
+  <div class="grid2">
+    <section class="card" id="changes">
+      <h2>스케줄 변경 이력</h2>
+      <p class="note">매일 수집하면서 전날과 달라진 ETA·ETD(6시간 이상), 상태 변경, 신규·삭제 항차.</p>
+      <div class="scroll" style="max-height: 24rem">
+        <table id="chg-table" data-source="changes" data-row-key="id">
+          <thead><tr>
+            <th data-field="date">수집일</th>
+            <th data-field="vessel">모선</th>
+            <th data-field="voyage">항차</th>
+            <th data-field="port">항구</th>
+            <th data-field="change">변경</th>
+            <th data-field="old">이전</th>
+            <th data-field="new">변경 후</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="empty" id="chg-empty" hidden>아직 변경 내역이 없습니다.</p>
+    </section>
+
+    <section class="card" id="rotation">
+      <h2>모선별 기항 일정</h2>
+      <p class="note">선택한 모선의 전체 기항지(최근 출항분 포함). Skip은 취소선.</p>
+      <div class="bar"><select id="vsl-pick" aria-label="모선 선택"></select></div>
+      <div class="scroll" style="max-height: 24rem">
+        <table id="rot-table" data-source="port_calls" data-row-key="key">
+          <thead><tr>
+            <th data-field="port">항구</th>
+            <th data-field="in_voy">입항 항차</th>
+            <th data-field="eta">ETA</th>
+            <th data-field="etb">ETB</th>
+            <th data-field="etd">ETD</th>
+            <th data-field="status">상태</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+dash.calc('summary', {
+  title: '항차 요약',
+  description: '모선 수, 단계별 항차 수, 다음 출항·도착, 최근 수집일의 변경 건수.',
+  inputs: ['sailings', 'changes'],
+  fn: (sailings, changes) => {
+    const fmt = (s) => s ? s.slice(5, 10).replace('-', '/') : '';
+    const firstEtd = (r) => [r.sha_status !== 'SKIP' && r.sha_etd, r.ngb_status !== 'SKIP' && r.ngb_etd].filter(Boolean).sort()[0] || '';
+    const up = sailings.filter((r) => r.stage === '선적 예정').sort((a, b) => firstEtd(a) < firstEtd(b) ? -1 : 1);
+    const coming = sailings.filter((r) => r.stage !== '과테말라 도착').sort((a, b) => a.pq_eta < b.pq_eta ? -1 : 1);
+    const last = changes.reduce((m, r) => r.date > m ? r.date : m, '');
+    return [{
+      vessels: new Set(sailings.map((r) => r.vessel)).size,
+      upcoming: up.length,
+      at_sea: sailings.filter((r) => r.stage === '항해 중').length,
+      changes_latest: changes.filter((r) => r.date === last).length,
+      next_dep: up[0] ? up[0].key + ' (' + fmt(firstEtd(up[0])) + ')' : '',
+      next_arr: coming[0] ? coming[0].key + ' (' + fmt(coming[0].pq_eta) + ')' : '',
+    }];
+  },
+});
+</script>
+
+<script>
+dash.calc('port_wait', {
+  title: '항구별 접안 대기',
+  description: '실적(ACTUAL) 기항에서 ETA부터 ETB까지의 대기 일수를 항구별로 평균·최장·횟수로 집계 (3회 이상 기항한 항구, 평균 큰 순 상위 10곳).',
+  inputs: ['port_calls'],
+  fn: (port_calls) => {
+    const t = (s) => new Date(s.replace(' ', 'T') + ':00Z').getTime();
+    const by = {};
+    port_calls.filter((r) => r.status === 'ACTUAL' && r.eta && r.etb).forEach((r) => {
+      const d = (t(r.etb) - t(r.eta)) / 864e5;
+      (by[r.port] = by[r.port] || []).push(Math.max(0, d));
+    });
+    return Object.entries(by).filter(([, v]) => v.length >= 3).map(([port, v]) => ({
+      port,
+      avg_days: Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10,
+      max_days: Math.round(Math.max(...v) * 10) / 10,
+      calls: v.length,
+    })).sort((a, b) => b.avg_days - a.avg_days).slice(0, 10);
+  },
+});
+</script>
+
+<script>
+const fmtDT =(s) => s ? s.slice(5, 10).replace('-', '/') + ' ' + s.slice(11, 16) : '—';
+const ST = { ACTUAL: ['A', '출항'], ESTIMATED: ['E', '예정'], SKIP: ['S', 'Skip'], LONGTERM: ['L', '장기'] };
+function pill(td, status, actualLabel) {
+  const s = ST[status];
+  if (!s) return;
+  const p = document.createElement('span');
+  p.className = 'pill p-' + s[0];
+  p.textContent = status === 'ACTUAL' && actualLabel ? actualLabel : s[1];
+  td.appendChild(p);
+}
+function dateCell(tr, value, status, actualLabel) {
+  const td = tr.insertCell();
+  const t = document.createElement('span');
+  t.textContent = fmtDT(value);
+  if (status === 'SKIP') t.className = 'skip';
+  td.appendChild(t);
+  if (value) pill(td, status, actualLabel);
+  return td;
+}
+window.gtDate = (s) => s ? new Date(s.replace(' ', 'T') + ':00') : null;
+
+// ---- tiles + lede
+dash.onData(() => {
+  const s = dash.data('summary');
+  document.querySelectorAll('[data-source="summary"]').forEach((el) => {
+    if (s.status === 'ok' && s.data[0]) {
+      el.classList.remove('dash-skeleton');
+      const v = s.data[0][el.dataset.field];
+      el.textContent = v === '' || v == null ? '—' : String(v);
+    } else if (s.status !== 'loading') {
+      el.classList.remove('dash-skeleton');
+      el.textContent = '—';
+    }
+  });
+});
+
+// ---- sailings table
+(() => {
+  const table = document.getElementById('sail-table');
+  const body = table.tBodies[0];
+  const q = document.getElementById('sail-q');
+  let stage = '', sortKey = 'pq_eta', dir = 1;
+  document.querySelectorAll('#sailings .chip').forEach((b) => b.addEventListener('click', () => {
+    stage = b.dataset.stage;
+    document.querySelectorAll('#sailings .chip').forEach((c) => c.setAttribute('aria-pressed', String(c === b)));
+    draw();
+  }));
+  q.addEventListener('input', () => draw());
+  table.querySelectorAll('th button').forEach((b) => b.addEventListener('click', () => {
+    const k = b.dataset.sort;
+    dir = sortKey === k ? -dir : 1; sortKey = k;
+    table.querySelectorAll('th button').forEach((x) => x.removeAttribute('aria-sort'));
+    b.setAttribute('aria-sort', dir > 0 ? 'ascending' : 'descending');
+    draw();
+  }));
+  function draw() {
+    const d = dash.data('sailings');
+    body.replaceChildren();
+    const wrap = table.parentElement;
+    wrap.querySelector('.fail')?.remove();
+    if (d.status === 'error') { const f = document.createElement('div'); f.className = 'fail'; f.textContent = 'Failed to load'; wrap.appendChild(f); return; }
+    if (d.status !== 'ok') return;
+    const term = q.value.trim().toUpperCase();
+    const cut = Date.now() - 14 * 864e5; // arrived more than two weeks ago: hidden
+    const rows = d.data.filter((r) => !(r.pq_status === 'ACTUAL' && gtDate(r.pq_eta) < cut))
+      .filter((r) => (!stage || r.stage === stage) && (!term || r.vessel.includes(term)))
+      .slice().sort((a, b) => {
+        const x = a[sortKey], y = b[sortKey];
+        if (x === y) return 0;
+        if (x == null || x === '') return 1;
+        if (y == null || y === '') return -1;
+        return (x < y ? -1 : 1) * dir;
+      });
+    rows.forEach((r) => {
+      const tr = body.insertRow();
+      tr.dataset.key = r.key;
+      if (r.stage === '과테말라 도착') tr.className = 'past';
+      const v = tr.insertCell(); v.className = 'v'; v.textContent = r.vessel;
+      tr.insertCell().textContent = r.voyage;
+      tr.insertCell().textContent = r.service;
+      dateCell(tr, r.sha_etd, r.sha_status, '출항');
+      dateCell(tr, r.ngb_etd, r.ngb_status, '출항');
+      dateCell(tr, r.pq_eta, r.pq_status, '도착');
+      tr.insertCell().textContent = r.transit_days == null ? '—' : String(r.transit_days);
+      const sc = tr.insertCell(); const sp = document.createElement('span');
+      sp.className = 'stage' + (r.stage === '과테말라 도착' ? ' s-arr' : r.stage === '항해 중' ? ' s-sea' : '');
+      sp.textContent = r.stage; sc.appendChild(sp);
+      const ch = tr.insertCell();
+      if (r.eta_shift_days == null || r.eta_shift_days === 0) ch.textContent = '—';
+      else { ch.textContent = (r.eta_shift_days > 0 ? '+' : '') + r.eta_shift_days + '일'; ch.className = r.eta_shift_days > 0 ? 'late' : 'early'; }
+      const dn = tr.insertCell(); dn.className = 'why';
+      const main = document.createElement('div');
+      main.textContent = r.delay_note || '—';
+      if (r.wait_days >= 3) main.className = 'late';
+      dn.appendChild(main);
+      if (r.last_shift_from && !(r.delay_note || '').includes('변동')) {
+        const sub = document.createElement('div'); sub.className = 'sub';
+        sub.textContent = '최근 변동 시작: ' + r.last_shift_from; dn.appendChild(sub);
+      }
+      tr.insertCell().textContent = r.skipped_ports || '—';
+    });
+  }
+  dash.onData(draw);
+})();
+
+// ---- gantt
+(() => {
+  const box = document.getElementById('gantt');
+  function draw() {
+    const d = dash.data('sailings');
+    box.replaceChildren();
+    if (d.status === 'error') { const f = document.createElement('div'); f.className = 'fail'; f.textContent = 'Failed to load'; box.appendChild(f); return; }
+    if (d.status !== 'ok') return;
+    const rows = d.data.filter((r) => r.stage !== '과테말라 도착').map((r) => {
+      const starts = [r.sha_status !== 'SKIP' && r.sha_etd, r.ngb_status !== 'SKIP' && r.ngb_etd].filter(Boolean).sort();
+      return { r, s: gtDate(starts[0]), e: gtDate(r.pq_eta) };
+    }).filter((x) => x.s && x.e).sort((a, b) => a.e - b.e);
+    if (!rows.length) { const p = document.createElement('p'); p.className = 'empty'; p.textContent = '도착 전 항차가 없습니다.'; box.appendChild(p); return; }
+    const W = box.clientWidth || 640, rowH = 22, top = 24, bottom = 8;
+    const H = top + rows.length * rowH + bottom;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', '항차별 출항부터 과테말라 도착까지 기간');
+    const meas = svg.append('text').attr('font-size', 12).attr('font-family', 'var(--font-anthropic-sans)');
+    let lw = 0; rows.forEach((x) => { meas.text(x.r.key); lw = Math.max(lw, meas.node().getComputedTextLength()); }); meas.remove();
+    const left = Math.ceil(lw) + 14, right = 16;
+    const today = new Date();
+    const x = d3.scaleUtc([d3.min(rows, (q) => q.s) < today ? d3.min(rows, (q) => q.s) : today, d3.max(rows, (q) => q.e)], [left, W - right]).nice();
+    const ticks = x.ticks(Math.max(2, Math.floor((W - left) / 90)));
+    const g = svg.append('g');
+    g.selectAll('line.grid').data(ticks).join('line').attr('x1', (t) => x(t)).attr('x2', (t) => x(t)).attr('y1', top - 6).attr('y2', H - bottom).attr('stroke', 'var(--cds-chart-grid)');
+    g.selectAll('text.tick').data(ticks).join('text').attr('x', (t) => x(t)).attr('y', top - 10).attr('text-anchor', 'middle').attr('font-size', 11).attr('fill', 'var(--color-fg-muted)').text(d3.utcFormat('%m/%d'));
+    const tx = x(today);
+    if (tx >= left && tx <= W - right) {
+      g.append('line').attr('x1', tx).attr('x2', tx).attr('y1', top - 4).attr('y2', H - bottom).attr('stroke', 'var(--cds-chart-reference)').attr('stroke-dasharray', '3 3');
+    }
+    const tip = d3.select(box).append('div').attr('class', 'tip').style('display', 'none');
+    const rowG = g.selectAll('g.row').data(rows).join('g').attr('transform', (q, i) => `translate(0,${top + i * rowH})`);
+    rowG.append('text').attr('x', left - 8).attr('y', rowH / 2 + 4).attr('text-anchor', 'end').attr('font-size', 12).attr('fill', 'var(--color-fg)').text((q) => q.r.key);
+    rowG.append('rect').attr('x', (q) => x(q.s)).attr('y', 5).attr('height', rowH - 10).attr('rx', 4)
+      .attr('width', (q) => Math.max(4, x(q.e) - x(q.s)))
+      .attr('fill', (q) => q.r.stage === '항해 중' ? dash.colors[1] : dash.colors[0])
+      .on('mousemove', (ev, q) => {
+        const [mx, my] = d3.pointer(ev, box);
+        tip.style('display', null).html('');
+        tip.append('div').attr('class', 'd').text(q.r.key + ' · ' + q.r.service);
+        tip.append('div').text('출항 ' + fmtDT(q.r.sha_status !== 'SKIP' && q.r.sha_etd ? q.r.sha_etd : q.r.ngb_etd));
+        tip.append('div').text('도착 ETA ' + fmtDT(q.r.pq_eta) + ' · ' + q.r.transit_days + '일');
+        const tw = tip.node().offsetWidth;
+        tip.style('left', Math.min(mx + 12, box.clientWidth - tw - 4) + 'px').style('top', (my + 12) + 'px');
+      })
+      .on('mouseleave', () => tip.style('display', 'none'));
+    box.style.minHeight = H + 'px';
+  }
+  dash.onData(draw);
+})();
+
+// ---- congestion
+(() => {
+  const box = document.getElementById('cong-chart');
+  function draw() {
+    const d = dash.data('port_wait');
+    box.replaceChildren();
+    if (d.status === 'error') { const f = document.createElement('div'); f.className = 'fail'; f.textContent = 'Failed to load'; box.appendChild(f); return; }
+    if (d.status !== 'ok' || !d.data.length) return;
+    const rows = d.data;
+    const W = box.clientWidth || 640, rowH = 24, top = 4;
+    const H = top + rows.length * rowH + 4;
+    const svg = d3.select(box).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', '항구별 평균 접안 대기일');
+    const meas = svg.append('text').attr('font-size', 12);
+    let lw = 0; rows.forEach((r) => { meas.text(r.port); lw = Math.max(lw, meas.node().getComputedTextLength()); });
+    let rw = 0; rows.forEach((r) => { meas.text(`최장 ${r.max_days}일 · ${r.calls}회`); rw = Math.max(rw, meas.node().getComputedTextLength()); });
+    meas.remove();
+    const left = Math.ceil(lw) + 12, right = Math.ceil(rw) + 48;
+    const x = d3.scaleLinear([0, d3.max(rows, (r) => r.avg_days) || 1], [left, Math.max(left + 40, W - right)]);
+    const g = svg.selectAll('g').data(rows).join('g').attr('transform', (r, i) => `translate(0,${top + i * rowH})`);
+    g.append('text').attr('x', left - 8).attr('y', rowH / 2 + 4).attr('text-anchor', 'end').attr('font-size', 12).attr('fill', 'var(--color-fg)').text((r) => r.port);
+    g.append('rect').attr('x', left).attr('y', 5).attr('height', rowH - 10).attr('rx', 4)
+      .attr('width', (r) => Math.max(2, x(r.avg_days) - left))
+      .attr('fill', (r) => r.avg_days >= 2 ? 'var(--cds-chart-status-critical)' : dash.colors[0]);
+    g.append('text').attr('x', (r) => x(r.avg_days) + 6).attr('y', rowH / 2 + 4).attr('font-size', 12).attr('fill', 'var(--color-fg-muted)')
+      .text((r) => `${r.avg_days}일 (최장 ${r.max_days}일 · ${r.calls}회)`);
+    box.style.minHeight = H + 'px';
+  }
+  dash.onData(draw);
+})();
+
+// ---- changes
+(() => {
+  const table = document.getElementById('chg-table');
+  const body = table.tBodies[0];
+  const empty = document.getElementById('chg-empty');
+  dash.onData(() => {
+    const d = dash.data('changes');
+    body.replaceChildren();
+    empty.hidden = !(d.status === 'ok' && d.data.length === 0);
+    if (d.status !== 'ok') return;
+    d.data.forEach((r) => {
+      const tr = body.insertRow();
+      tr.dataset.key = r.id;
+      if (r.vessel === '전체') tr.className = 'sys';
+      [r.date, r.vessel, r.voyage || '—', r.port || '—'].forEach((t) => { tr.insertCell().textContent = t; });
+      const c = tr.insertCell(); c.textContent = r.change;
+      if (/지연|삭제|SKIP/.test(r.change)) c.className = 'late';
+      else if (/당김|신규/.test(r.change)) c.className = 'early';
+      tr.insertCell().textContent = /^\d{4}-/.test(r.old) ? fmtDT(r.old) : (r.old || '—');
+      tr.insertCell().textContent = /^\d{4}-/.test(r.new) ? fmtDT(r.new) : (r.new || '—');
+    });
+  });
+})();
+
+// ---- rotation
+(() => {
+  const pick = document.getElementById('vsl-pick');
+  const body = document.getElementById('rot-table').tBodies[0];
+  let chosen = '';
+  pick.addEventListener('change', () => { chosen = pick.value; draw(); });
+  function draw() {
+    const d = dash.data('port_calls');
+    body.replaceChildren();
+    if (d.status !== 'ok') return;
+    const names = [...new Set(d.data.map((r) => r.vessel))].sort();
+    if (!chosen || !names.includes(chosen)) chosen = names[0] || '';
+    pick.replaceChildren(...names.map((n) => new Option(n, n)));
+    pick.value = chosen;
+    d.data.filter((r) => r.vessel === chosen).forEach((r) => {
+      const tr = body.insertRow();
+      tr.dataset.key = r.key;
+      const p = tr.insertCell(); p.textContent = r.port;
+      if (r.port === 'PUERTO QUETZAL') p.className = 'v';
+      if (r.port === 'SHANGHAI' || r.port === 'NINGBO') p.className = 'v';
+      if (r.status === 'SKIP') p.classList.add('skip');
+      tr.insertCell().textContent = r.in_voy || '—';
+      tr.insertCell().textContent = fmtDT(r.eta);
+      tr.insertCell().textContent = fmtDT(r.etb);
+      tr.insertCell().textContent = fmtDT(r.etd);
+      const s = tr.insertCell(); s.textContent = (ST[r.status] || ['', r.status])[1];
+      s.className = 'p-' + ((ST[r.status] || ['E'])[0]);
+    });
+  }
+  dash.onData(draw);
+})();
+</script>
+
+<footer class="site">참고용 추정 스케줄이며 완하이 사정에 따라 예고 없이 바뀔 수 있습니다.</footer>
+</div>
+</body>
+</html>
