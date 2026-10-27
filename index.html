@@ -133,6 +133,7 @@ footer.site { color: var(--color-fg-muted); font-size: 12px; margin-top: 32px; }
 .gt .fail::before { content: ""; width: .375rem; height: .375rem; border-radius: 50%; background: var(--color-bad); }
 .gt [data-dash-source-state=empty] { color: transparent; }
 .gt [data-dash-source-state=refreshing] { opacity: .5; transition: opacity var(--cds-dur-slow); }
+.gt h2 .upd { font-size: var(--cds-font-size-caption); font-weight: 400; color: var(--color-fg-muted); margin-left: 8px; font-variant-numeric: tabular-nums; }
 .gt td.why { white-space: normal; min-width: 11rem; }
 .gt td .sub { color: var(--color-fg-muted); font-size: 11px; }
 .gt .note b { color: var(--color-fg); font-weight: 600; }
@@ -157,7 +158,7 @@ footer.site { color: var(--color-fg-muted); font-size: 12px; margin-top: 32px; }
   </section>
 
   <section class="card" id="sailings">
-    <h2>과테말라행 항차</h2>
+    <h2>과테말라행 항차 <span class="upd">업데이트 <span class="dash-skeleton" data-source="summary" data-field="updated">—</span></span></h2>
     <p class="note">항차별 상해·닝보 출항(ETD)과 Puerto Quetzal 도착(ETA). 출항 후에도 모선별 조회로 도착까지 계속 추적하고, 도착 후 2주가 지나면 목록에서 빠집니다. 상태: 출항=상해·닝보 실제 출항, 도착=Puerto Quetzal 실제 도착, 예정=추정, Skip=해당 항구 미기항, 장기=장기 계획.</p>
     <p class="note"><b>ETA 변동</b>은 전날 수집분 대비. <b>지연 발생 지점</b>은 이 항차(직전 귀항 구간 포함)에서 이미 기항한 항구 중 입항(ETA)→접안(ETB) 대기가 가장 길었던 곳(24시간 이상)과, ETA가 바뀐 날 처음 일정이 밀린 항구입니다. 3일 이상 대기는 빨간색.</p>
     <div class="bar">
@@ -244,7 +245,7 @@ footer.site { color: var(--color-fg-muted); font-size: 12px; margin-top: 32px; }
 <script>
 dash.calc('summary', {
   title: '항차 요약',
-  description: '모선 수, 단계별 항차 수, 다음 출항·도착, 최근 수집일의 변경 건수.',
+  description: '모선 수, 단계별 항차 수, 다음 출항·도착, 최근 수집일의 변경 건수, 마지막 수집 시각.',
   inputs: ['sailings', 'changes'],
   fn: (sailings, changes) => {
     const fmt = (s) => s ? s.slice(5, 10).replace('-', '/') : '';
@@ -252,6 +253,7 @@ dash.calc('summary', {
     const up = sailings.filter((r) => r.stage === '선적 예정').sort((a, b) => firstEtd(a) < firstEtd(b) ? -1 : 1);
     const coming = sailings.filter((r) => r.stage !== '과테말라 도착').sort((a, b) => a.pq_eta < b.pq_eta ? -1 : 1);
     const last = changes.reduce((m, r) => r.date > m ? r.date : m, '');
+    const updated = sailings.reduce((m, r) => (r.collected_at || '') > m ? r.collected_at : m, '');
     return [{
       vessels: new Set(sailings.map((r) => r.vessel)).size,
       upcoming: up.length,
@@ -259,6 +261,7 @@ dash.calc('summary', {
       changes_latest: changes.filter((r) => r.date === last).length,
       next_dep: up[0] ? up[0].key + ' (' + fmt(firstEtd(up[0])) + ')' : '',
       next_arr: coming[0] ? coming[0].key + ' (' + fmt(coming[0].pq_eta) + ')' : '',
+      updated: updated ? updated.replace(/-/g, '.') + (updated.length > 10 ? '' : '') : '',
     }];
   },
 });
